@@ -1,0 +1,147 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Step Functions for essential incident response using AWS SAM
+
+Parameters:
+  StateMachineName:
+    Type: String
+    Description: Name of the Step Function
+  LogLevel:
+    Type: String
+    Default: ALL
+    AllowedValues:
+      - ALL
+      - ERROR
+      - FATAL
+      - OFF
+    Description: Log level for state machine
+  MaxConcurrency:
+    Type: Number
+    Default: 5
+    Description: Max concurrency for Parallel state execution
+
+Resources:
+  IncidentResponseExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${StateMachineName}-ExecutionRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: !Sub "${StateMachineName}"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: AllowCreateTagsOnEC2Instances
+                Effect: Allow
+                Action:
+                  - ec2:CreateTags
+                  - ec2:ModifyInstanceAttribute
+                  - ec2:DescribeInstanceAttribute
+                Resource:
+                  - arn:aws:ec2:*:*:instance/*
+                  - arn:aws:ec2:*:*:snapshot/*
+                  - arn:aws:ec2:*:*:volume/*
+              - Sid: AllowDescribeEC2Instances
+                Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeTags
+                Resource: "*"
+              - Sid: AllowCreateSnapshots
+                Effect: Allow
+                Action:
+                  - ec2:CreateSnapshot
+                  - ec2:DescribeSnapshots
+                  - ec2:CopySnapshot
+                  - ec2:DeleteSnapshot
+                Resource: "*"
+              - Sid: AllowInstanceProfileAssociations
+                Effect: Allow
+                Action:
+                  - ec2:DescribeIamInstanceProfileAssociations
+                  - ec2:DisassociateIamInstanceProfile
+                Resource: "*"
+              - Sid: AllowDetachASG
+                Effect: Allow
+                Action:
+                  - autoscaling:DescribeAutoScalingInstances
+                  - autoscaling:DetachInstances
+                Resource: "*"
+              - Sid: AllowDeregisterTargets
+                Effect: Allow
+                Action:
+                  - elasticloadbalancing:DescribeTargetGroups
+                  - elasticloadbalancing:DescribeTargetHealth
+                  - elasticloadbalancing:DeregisterTargets
+                Resource: "*"
+              - Sid: AllowModifyNetworkInterfaceAttribute
+                Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:CreateSecurityGroup
+                  - ec2:ModifyNetworkInterfaceAttribute
+                Resource: "*"
+        - PolicyName: !Sub "${StateMachineName}-Logs"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogDelivery
+                  - logs:CreateLogStream
+                  - logs:GetLogDelivery
+                  - logs:UpdateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:PutLogEvents
+                  - logs:PutResourcePolicy
+                  - logs:DescribeResourcePolicies
+                  - logs:DescribeLogGroups
+                Resource: "*"
+        - PolicyName: !Sub "XRayAccessPolicy-${AWS::Region}-${AWS::StackName}"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                  - xray:GetSamplingRules
+                  - xray:GetSamplingTargets
+                Resource: "*"
+
+  IncidentResponseStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Ref StateMachineName
+      Role: !GetAtt IncidentResponseExecutionRole.Arn
+      DefinitionUri: Stepfunctions/state-machine-for-essential-incident-response-tasks.asl.json
+      Logging:
+        Level: !Ref LogLevel
+        IncludeExecutionData: true
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt StateMachineLogGroup.Arn
+      Tracing:
+        Enabled: true
+
+  StateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/vendedlogs/states/${StateMachineName}"
+      RetentionInDays: 30
+
+Outputs:
+  StepFunctionName:
+    Value: !Ref IncidentResponseStateMachine
+  RoleName:
+    Value: !Ref IncidentResponseExecutionRole
+  LogGroupName:
+    Value: !Ref StateMachineLogGroup

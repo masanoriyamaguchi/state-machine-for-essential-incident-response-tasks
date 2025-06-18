@@ -1,0 +1,1719 @@
+{
+  "Comment": "well-architected-security-incident-responce-StateMachine",
+  "TimeoutSeconds": 7200,
+  "StartAt": "LoopInstances",
+  "States": {
+    "LoopInstances": {
+      "Type": "Map",
+      "ItemsPath": "$.InstanceIds",
+      "MaxConcurrency": 5,
+      "Parameters": {
+        "InstanceId.$": "$$.Map.Item.Value",
+        "Region.$": "$.Region"
+      },
+      "Iterator": {
+        "StartAt": "CreateTags - Under investigation",
+        "States": {
+          "CreateTags - Under investigation": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::aws-sdk:ec2:createTags",
+            "Parameters": {
+              "Resources.$": "States.Array($.InstanceId)",
+              "Tags": [
+                {
+                  "Key": "SecurityIncidentStatus",
+                  "Value": "Investigation"
+                }
+              ]
+            },
+            "Next": "DescribeTag",
+            "ResultPath": null,
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "States.Timeout",
+                  "States.HeartbeatTimeout"
+                ],
+                "BackoffRate": 2,
+                "IntervalSeconds": 5,
+                "MaxAttempts": 5
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "CheckTagFailed",
+                "ResultPath": "$.ErrorInfo"
+              }
+            ]
+          },
+          "DescribeTag": {
+            "Type": "Task",
+            "Parameters": {
+              "Filters": [
+                {
+                  "Name": "resource-id",
+                  "Values.$": "States.Array($.InstanceId)"
+                },
+                {
+                  "Name": "key",
+                  "Values": [
+                    "SecurityIncidentStatus"
+                  ]
+                }
+              ]
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ec2:describeTags",
+            "ResultPath": "$.DescribeTagResult",
+            "Next": "CheckTag",
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "States.Timeout",
+                  "States.HeartbeatTimeout"
+                ],
+                "BackoffRate": 2,
+                "IntervalSeconds": 5,
+                "MaxAttempts": 5
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "CheckTagFailed",
+                "ResultPath": "$.ErrorInfo"
+              }
+            ]
+          },
+          "CheckTag": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Next": "EnableTerminationProtection",
+                "Variable": "$.DescribeTagResult.Tags[0].Value",
+                "StringEquals": "Investigation"
+              }
+            ],
+            "Default": "CheckTagFailed"
+          },
+          "EnableTerminationProtection": {
+            "Type": "Task",
+            "Parameters": {
+              "InstanceId.$": "$.InstanceId",
+              "DisableApiTermination": {
+                "Value": true
+              }
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ec2:modifyInstanceAttribute",
+            "ResultPath": null,
+            "Next": "SetShutdownBehavior",
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "States.Timeout",
+                  "States.HeartbeatTimeout"
+                ],
+                "BackoffRate": 2,
+                "IntervalSeconds": 5,
+                "MaxAttempts": 5
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "TerminationProtectionFailed",
+                "ResultPath": "$.ErrorInfo"
+              }
+            ]
+          },
+          "SetShutdownBehavior": {
+            "Type": "Task",
+            "Parameters": {
+              "InstanceId.$": "$.InstanceId",
+              "InstanceInitiatedShutdownBehavior": {
+                "Value": "stop"
+              }
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ec2:modifyInstanceAttribute",
+            "ResultPath": null,
+            "Next": "DisableApiStop",
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "States.Timeout",
+                  "States.HeartbeatTimeout"
+                ],
+                "BackoffRate": 2,
+                "MaxAttempts": 5,
+                "IntervalSeconds": 5
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "TerminationProtectionFailed",
+                "ResultPath": "$.ErrorInfo"
+              }
+            ]
+          },
+          "DisableApiStop": {
+            "Type": "Task",
+            "Parameters": {
+              "InstanceId.$": "$.InstanceId",
+              "DisableApiStop": {
+                "Value": true
+              }
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ec2:modifyInstanceAttribute",
+            "ResultPath": null,
+            "Next": "DescribeTerminationProtection",
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "States.Timeout",
+                  "States.HeartbeatTimeout"
+                ],
+                "BackoffRate": 2,
+                "IntervalSeconds": 5,
+                "MaxAttempts": 5
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "TerminationProtectionFailed",
+                "ResultPath": "$.ErrorInfo"
+              }
+            ]
+          },
+          "DescribeTerminationProtection": {
+            "Type": "Task",
+            "Parameters": {
+              "InstanceId.$": "$.InstanceId",
+              "Attribute": "disableApiTermination"
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ec2:describeInstanceAttribute",
+            "Next": "DescribeShutdownBehavior",
+            "ResultPath": "$.DescribeTerminationProtectionResult",
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "States.Timeout",
+                  "States.HeartbeatTimeout"
+                ],
+                "BackoffRate": 2,
+                "IntervalSeconds": 5,
+                "MaxAttempts": 5
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "TerminationProtectionFailed",
+                "ResultPath": "$.ErrorInfo"
+              }
+            ]
+          },
+          "DescribeShutdownBehavior": {
+            "Type": "Task",
+            "Parameters": {
+              "InstanceId.$": "$.InstanceId",
+              "Attribute": "instanceInitiatedShutdownBehavior"
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ec2:describeInstanceAttribute",
+            "ResultPath": "$.DescribeShutdownBehaviorResult",
+            "Next": "DescribeApiStop",
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "States.Timeout",
+                  "States.HeartbeatTimeout"
+                ],
+                "BackoffRate": 2,
+                "MaxAttempts": 5,
+                "IntervalSeconds": 5
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "TerminationProtectionFailed",
+                "ResultPath": "$.ErrorInfo"
+              }
+            ]
+          },
+          "DescribeApiStop": {
+            "Type": "Task",
+            "Parameters": {
+              "InstanceId.$": "$.InstanceId",
+              "Attribute": "disableApiStop"
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ec2:describeInstanceAttribute",
+            "ResultPath": "$.DescribeApiStopResult",
+            "Next": "CheckInstanceTerminationAndStopProtection",
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "States.Timeout",
+                  "States.HeartbeatTimeout"
+                ],
+                "BackoffRate": 2,
+                "IntervalSeconds": 5,
+                "MaxAttempts": 5
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "TerminationProtectionFailed",
+                "ResultPath": "$.ErrorInfo"
+              }
+            ]
+          },
+          "CheckInstanceTerminationAndStopProtection": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Next": "AcquireInstanceMetadata",
+                "And": [
+                  {
+                    "Variable": "$.DescribeTerminationProtectionResult.DisableApiTermination.Value",
+                    "BooleanEquals": true
+                  },
+                  {
+                    "Variable": "$.DescribeShutdownBehaviorResult.InstanceInitiatedShutdownBehavior.Value",
+                    "StringEquals": "stop"
+                  },
+                  {
+                    "Variable": "$.DescribeApiStopResult.DisableApiStop.Value",
+                    "BooleanEquals": true
+                  }
+                ]
+              }
+            ],
+            "Default": "TerminationProtectionFailed"
+          },
+          "AcquireInstanceMetadata": {
+            "Type": "Task",
+            "Parameters": {
+              "InstanceIds.$": "States.Array($.InstanceId)"
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ec2:describeInstances",
+            "ResultPath": "$.AcquireInstanceMetadataResult",
+            "Next": "PrepareParallelProcessing",
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "States.Timeout",
+                  "States.HeartbeatTimeout"
+                ],
+                "BackoffRate": 2,
+                "IntervalSeconds": 5,
+                "MaxAttempts": 5
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "AcquireInstanceMetadataFailed",
+                "ResultPath": "$.ErrorInfo"
+              }
+            ]
+          },
+          "AcquireInstanceMetadataFailed": {
+            "Type": "Fail"
+          },
+          "PrepareParallelProcessing": {
+            "Type": "Task",
+            "Parameters": {
+              "InstanceIds.$": "States.Array($.InstanceId)"
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ec2:describeInstances",
+            "ResultPath": "$.PrepareParallelProcessingResult",
+            "ResultSelector": {
+              "VolumeIds.$": "$.Reservations[0].Instances[0].BlockDeviceMappings[*].Ebs.VolumeId",
+              "DeviceNames.$": "$.Reservations[0].Instances[0].BlockDeviceMappings[*].DeviceName",
+              "NetworkInterfaceIds.$": "$.Reservations[0].Instances[0].NetworkInterfaces[*].NetworkInterfaceId"
+            },
+            "Next": "Parallel Incident Response Tasks",
+            "Retry": [
+              {
+                "ErrorEquals": [
+                  "States.Timeout",
+                  "States.HeartbeatTimeout"
+                ],
+                "BackoffRate": 2,
+                "IntervalSeconds": 5,
+                "MaxAttempts": 5
+              }
+            ],
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "PrepareParallelProcessingFailed",
+                "ResultPath": "$.ErrorInfo"
+              }
+            ]
+          },
+          "PrepareParallelProcessingFailed": {
+            "Type": "Fail"
+          },
+          "Parallel Incident Response Tasks": {
+            "Type": "Parallel",
+            "Branches": [
+              {
+                "StartAt": "Create a snapshot for each volume",
+                "States": {
+                  "Create a snapshot for each volume": {
+                    "Type": "Map",
+                    "ItemProcessor": {
+                      "ProcessorConfig": {
+                        "Mode": "INLINE"
+                      },
+                      "StartAt": "TagAttachedEBSVolume",
+                      "States": {
+                        "TagAttachedEBSVolume": {
+                          "Type": "Task",
+                          "Parameters": {
+                            "Resources.$": "States.Array($.VolumeId)",
+                            "Tags": [
+                              {
+                                "Key": "SecurityIncidentStatus",
+                                "Value": "Investigation"
+                              },
+                              {
+                                "Key": "InstanceId",
+                                "Value.$": "$.InstanceId"
+                              }
+                            ]
+                          },
+                          "Resource": "arn:aws:states:::aws-sdk:ec2:createTags",
+                          "Next": "CreateSnapshot",
+                          "ResultPath": null,
+                          "Retry": [
+                            {
+                              "ErrorEquals": [
+                                "States.Timeout",
+                                "States.HeartbeatTimeout"
+                              ],
+                              "BackoffRate": 2,
+                              "IntervalSeconds": 5,
+                              "MaxAttempts": 5
+                            }
+                          ],
+                          "Catch": [
+                            {
+                              "ErrorEquals": [
+                                "States.ALL"
+                              ],
+                              "Next": "CreateSnapshotFailed",
+                              "ResultPath": "$.ErrorInfo"
+                            }
+                          ]
+                        },
+                        "CreateSnapshot": {
+                          "Type": "Task",
+                          "Parameters": {
+                            "VolumeId.$": "$.VolumeId"
+                          },
+                          "Resource": "arn:aws:states:::aws-sdk:ec2:createSnapshot",
+                          "ResultPath": "$.CreateSnapshotResult",
+                          "Next": "InitializeSnapshotStatusCheckCount",
+                          "Retry": [
+                            {
+                              "ErrorEquals": [
+                                "States.Timeout",
+                                "States.HeartbeatTimeout"
+                              ],
+                              "BackoffRate": 2,
+                              "IntervalSeconds": 5,
+                              "MaxAttempts": 5
+                            }
+                          ],
+                          "Catch": [
+                            {
+                              "ErrorEquals": [
+                                "States.ALL"
+                              ],
+                              "Next": "CreateSnapshotFailed",
+                              "ResultPath": "$.ErrorInfo"
+                            }
+                          ]
+                        },
+                        "InitializeSnapshotStatusCheckCount": {
+                          "Type": "Pass",
+                          "Next": "WaitForCreateSnapshot",
+                          "Result": {
+                            "Count": 1,
+                            "Step": 1
+                          },
+                          "ResultPath": "$.SnapshotStatusCheckCount"
+                        },
+                        "WaitForCreateSnapshot": {
+                          "Type": "Wait",
+                          "Seconds": 30,
+                          "Next": "DescribeSnapshots"
+                        },
+                        "DescribeSnapshots": {
+                          "Type": "Task",
+                          "Parameters": {
+                            "SnapshotIds.$": "States.Array($.CreateSnapshotResult.SnapshotId)"
+                          },
+                          "Resource": "arn:aws:states:::aws-sdk:ec2:describeSnapshots",
+                          "Next": "CheckCreateSnapshotStatus",
+                          "ResultPath": "$.DescribeSnapshotsResults",
+                          "Retry": [
+                            {
+                              "ErrorEquals": [
+                                "States.Timeout",
+                                "States.HeartbeatTimeout"
+                              ],
+                              "BackoffRate": 2,
+                              "IntervalSeconds": 5,
+                              "MaxAttempts": 5
+                            }
+                          ],
+                          "Catch": [
+                            {
+                              "ErrorEquals": [
+                                "States.ALL"
+                              ],
+                              "Next": "CreateSnapshotFailed",
+                              "ResultPath": "$.ErrorInfo"
+                            }
+                          ]
+                        },
+                        "CheckCreateSnapshotStatus": {
+                          "Type": "Choice",
+                          "Choices": [
+                            {
+                              "Next": "SnapshotCreationCompleted",
+                              "Variable": "$.DescribeSnapshotsResults.Snapshots[0].State",
+                              "StringEquals": "completed"
+                            },
+                            {
+                              "Next": "CreateSnapshotFailed",
+                              "Variable": "$.DescribeSnapshotsResults.Snapshots[0].State",
+                              "StringEquals": "error"
+                            },
+                            {
+                              "Next": "SnapshotStatusCheckCount",
+                              "And": [
+                                {
+                                  "Not": {
+                                    "Variable": "$.DescribeSnapshotsResults.Snapshots[0].State",
+                                    "StringEquals": "completed"
+                                  }
+                                },
+                                {
+                                  "Not": {
+                                    "Variable": "$.DescribeSnapshotsResults.Snapshots[0].State",
+                                    "StringEquals": "error"
+                                  }
+                                },
+                                {
+                                  "Variable": "$.SnapshotStatusCheckCount.Count",
+                                  "NumericLessThan": 20
+                                }
+                              ]
+                            }
+                          ],
+                          "Default": "CreateSnapshotFailed"
+                        },
+                        "SnapshotStatusCheckCount": {
+                          "Type": "Pass",
+                          "Next": "WaitForCreateSnapshot",
+                          "ResultPath": "$.SnapshotStatusCheckCount",
+                          "Parameters": {
+                            "Count.$": "States.MathAdd($.SnapshotStatusCheckCount.Count, $.SnapshotStatusCheckCount.Step)",
+                            "Step": 1
+                          }
+                        },
+                        "SnapshotCreationCompleted": {
+                          "Type": "Pass",
+                          "Next": "CheckSnapshotEncryption"
+                        },
+                        "CheckSnapshotEncryption": {
+                          "Type": "Choice",
+                          "Choices": [
+                            {
+                              "Next": "CopyEncryptedSnapshot",
+                              "Variable": "$.CreateSnapshotResult.Encrypted",
+                              "BooleanEquals": false
+                            }
+                          ],
+                          "Default": "TagEncryptedSnapshot"
+                        },
+                        "TagEncryptedSnapshot": {
+                          "Type": "Task",
+                          "Parameters": {
+                            "Resources.$": "States.Array($.CreateSnapshotResult.SnapshotId)",
+                            "Tags": [
+                              {
+                                "Key": "SecurityIncidentStatus",
+                                "Value": "Investigation"
+                              },
+                              {
+                                "Key": "InstanceId",
+                                "Value.$": "$.InstanceId"
+                              }
+                            ]
+                          },
+                          "Resource": "arn:aws:states:::aws-sdk:ec2:createTags",
+                          "End": true,
+                          "Retry": [
+                            {
+                              "ErrorEquals": [
+                                "States.Timeout",
+                                "States.HeartbeatTimeout"
+                              ],
+                              "BackoffRate": 2,
+                              "IntervalSeconds": 5,
+                              "MaxAttempts": 5
+                            }
+                          ],
+                          "Catch": [
+                            {
+                              "ErrorEquals": [
+                                "States.ALL"
+                              ],
+                              "Next": "TagEncryptedSnapshotFailed",
+                              "ResultPath": "$.ErrorInfo"
+                            }
+                          ]
+                        },
+                        "TagEncryptedSnapshotFailed": {
+                          "Type": "Fail"
+                        },
+                        "CopyEncryptedSnapshot": {
+                          "Type": "Task",
+                          "Parameters": {
+                            "SourceRegion.$": "$.Region",
+                            "SourceSnapshotId.$": "$.CreateSnapshotResult.SnapshotId",
+                            "Encrypted": true
+                          },
+                          "Resource": "arn:aws:states:::aws-sdk:ec2:copySnapshot",
+                          "ResultPath": "$.CopyEncryptedSnapshotResult",
+                          "Next": "InitializeEncryptedSnapshotCheckCount",
+                          "Retry": [
+                            {
+                              "ErrorEquals": [
+                                "States.Timeout",
+                                "States.HeartbeatTimeout"
+                              ],
+                              "BackoffRate": 2,
+                              "IntervalSeconds": 5,
+                              "MaxAttempts": 5
+                            }
+                          ],
+                          "Catch": [
+                            {
+                              "ErrorEquals": [
+                                "States.ALL"
+                              ],
+                              "Next": "CopyEncryptedSnapshotFailed",
+                              "ResultPath": "$.ErrorInfo"
+                            }
+                          ]
+                        },
+                        "InitializeEncryptedSnapshotCheckCount": {
+                          "Type": "Pass",
+                          "Next": "WaitForEncryptedSnapshotCompletion",
+                          "Result": {
+                            "Count": 1,
+                            "Step": 1
+                          },
+                          "ResultPath": "$.EncryptedSnapshotStatusCheckCount"
+                        },
+                        "WaitForEncryptedSnapshotCompletion": {
+                          "Type": "Wait",
+                          "Seconds": 30,
+                          "Next": "DescribeEncryptedSnapshot"
+                        },
+                        "DescribeEncryptedSnapshot": {
+                          "Type": "Task",
+                          "Parameters": {
+                            "SnapshotIds.$": "States.Array($.CopyEncryptedSnapshotResult.SnapshotId)"
+                          },
+                          "Resource": "arn:aws:states:::aws-sdk:ec2:describeSnapshots",
+                          "Next": "CheckEncryptedSnapshotStatus",
+                          "ResultPath": "$.DescribeEncryptedSnapshotResult",
+                          "Retry": [
+                            {
+                              "ErrorEquals": [
+                                "States.Timeout",
+                                "States.HeartbeatTimeout"
+                              ],
+                              "BackoffRate": 2,
+                              "MaxAttempts": 5,
+                              "IntervalSeconds": 5
+                            }
+                          ],
+                          "Catch": [
+                            {
+                              "ErrorEquals": [
+                                "States.ALL"
+                              ],
+                              "Next": "CopyEncryptedSnapshotFailed",
+                              "ResultPath": "$.ErrorInfo"
+                            }
+                          ]
+                        },
+                        "CheckEncryptedSnapshotStatus": {
+                          "Type": "Choice",
+                          "Choices": [
+                            {
+                              "Next": "DeleteOriginalSnapshot",
+                              "Variable": "$.DescribeEncryptedSnapshotResult.Snapshots[0].State",
+                              "StringEquals": "completed"
+                            },
+                            {
+                              "Next": "CopyEncryptedSnapshotFailed",
+                              "Variable": "$.DescribeEncryptedSnapshotResult.Snapshots[0].State",
+                              "StringEquals": "error"
+                            },
+                            {
+                              "Next": "EncryptedSnapshotStatusCheckCount",
+                              "And": [
+                                {
+                                  "Not": {
+                                    "Variable": "$.DescribeEncryptedSnapshotResult.Snapshots[0].State",
+                                    "StringEquals": "completed"
+                                  }
+                                },
+                                {
+                                  "Variable": "$.EncryptedSnapshotStatusCheckCount.Count",
+                                  "NumericLessThan": 20
+                                }
+                              ]
+                            }
+                          ],
+                          "Default": "CopyEncryptedSnapshotFailed"
+                        },
+                        "CopyEncryptedSnapshotFailed": {
+                          "Type": "Fail",
+                          "Error": "EncryptedSnapshotCopyFailed",
+                          "Cause": "The encrypted snapshot copy did not complete successfully."
+                        },
+                        "DeleteOriginalSnapshot": {
+                          "Type": "Task",
+                          "Parameters": {
+                            "SnapshotId.$": "$.CreateSnapshotResult.SnapshotId"
+                          },
+                          "Resource": "arn:aws:states:::aws-sdk:ec2:deleteSnapshot",
+                          "Next": "TagEncryptedSnapshotFromCopy",
+                          "ResultPath": null,
+                          "Retry": [
+                            {
+                              "ErrorEquals": [
+                                "States.Timeout",
+                                "States.HeartbeatTimeout"
+                              ],
+                              "BackoffRate": 2,
+                              "IntervalSeconds": 5,
+                              "MaxAttempts": 5
+                            }
+                          ],
+                          "Catch": [
+                            {
+                              "ErrorEquals": [
+                                "States.ALL"
+                              ],
+                              "Next": "DeleteOriginalSnapshotFailed",
+                              "ResultPath": "$.ErrorInfo"
+                            }
+                          ]
+                        },
+                        "DeleteOriginalSnapshotFailed": {
+                          "Type": "Fail"
+                        },
+                        "TagEncryptedSnapshotFromCopy": {
+                          "Type": "Task",
+                          "Parameters": {
+                            "Resources.$": "States.Array($.CopyEncryptedSnapshotResult.SnapshotId)",
+                            "Tags": [
+                              {
+                                "Key": "SecurityIncidentStatus",
+                                "Value": "Investigation"
+                              },
+                              {
+                                "Key": "InstanceId",
+                                "Value.$": "$.InstanceId"
+                              }
+                            ]
+                          },
+                          "Resource": "arn:aws:states:::aws-sdk:ec2:createTags",
+                          "End": true,
+                          "Retry": [
+                            {
+                              "ErrorEquals": [
+                                "States.Timeout",
+                                "States.HeartbeatTimeout"
+                              ],
+                              "BackoffRate": 2,
+                              "IntervalSeconds": 5,
+                              "MaxAttempts": 5
+                            }
+                          ],
+                          "Catch": [
+                            {
+                              "ErrorEquals": [
+                                "States.ALL"
+                              ],
+                              "Next": "TagEncryptedSnapshotFromCopyFailed",
+                              "ResultPath": "$.ErrorInfo"
+                            }
+                          ]
+                        },
+                        "TagEncryptedSnapshotFromCopyFailed": {
+                          "Type": "Fail"
+                        },
+                        "CreateSnapshotFailed": {
+                          "Type": "Fail"
+                        },
+                        "EncryptedSnapshotStatusCheckCount": {
+                          "Type": "Pass",
+                          "Parameters": {
+                            "Count.$": "States.MathAdd($.EncryptedSnapshotStatusCheckCount.Count, $.EncryptedSnapshotStatusCheckCount.Step)",
+                            "Step": 1
+                          },
+                          "ResultPath": "$.EncryptedSnapshotStatusCheckCount",
+                          "Next": "WaitForEncryptedSnapshotCompletion"
+                        }
+                      }
+                    },
+                    "End": true,
+                    "ItemsPath": "$.PrepareParallelProcessingResult.VolumeIds",
+                    "MaxConcurrency": 30,
+                    "ItemSelector": {
+                      "VolumeId.$": "$$.Map.Item.Value",
+                      "InstanceId.$": "$.InstanceId",
+                      "Region.$": "$.Region"
+                    }
+                  }
+                }
+              },
+              {
+                "StartAt": "Disable DeleteOnTermination for each volume",
+                "States": {
+                  "Disable DeleteOnTermination for each volume": {
+                    "Type": "Map",
+                    "ItemProcessor": {
+                      "ProcessorConfig": {
+                        "Mode": "INLINE"
+                      },
+                      "StartAt": "DisableDeleteOnTerminationForEBSvolume",
+                      "States": {
+                        "DisableDeleteOnTerminationForEBSvolume": {
+                          "Type": "Task",
+                          "Parameters": {
+                            "InstanceId.$": "$.InstanceId",
+                            "BlockDeviceMappings": [
+                              {
+                                "DeviceName.$": "$.DeviceName",
+                                "Ebs": {
+                                  "DeleteOnTermination": false
+                                }
+                              }
+                            ]
+                          },
+                          "Resource": "arn:aws:states:::aws-sdk:ec2:modifyInstanceAttribute",
+                          "Next": "WaitForDisableDeleteOnTermination",
+                          "ResultPath": null,
+                          "Retry": [
+                            {
+                              "ErrorEquals": [
+                                "States.Timeout",
+                                "States.HeartbeatTimeout"
+                              ],
+                              "BackoffRate": 2,
+                              "IntervalSeconds": 5,
+                              "MaxAttempts": 5
+                            }
+                          ],
+                          "Catch": [
+                            {
+                              "ErrorEquals": [
+                                "States.ALL"
+                              ],
+                              "Next": "DisableDeleteOnTerminationForEBSvolumeFailed",
+                              "ResultPath": "$.ErrorInfo"
+                            }
+                          ]
+                        },
+                        "DisableDeleteOnTerminationForEBSvolumeFailed": {
+                          "Type": "Fail"
+                        },
+                        "WaitForDisableDeleteOnTermination": {
+                          "Type": "Wait",
+                          "Seconds": 5,
+                          "Next": "DescribeInstanceAttribute"
+                        },
+                        "DescribeInstanceAttribute": {
+                          "Type": "Task",
+                          "Parameters": {
+                            "InstanceId.$": "$.InstanceId",
+                            "Attribute": "blockDeviceMapping"
+                          },
+                          "Resource": "arn:aws:states:::aws-sdk:ec2:describeInstanceAttribute",
+                          "ResultPath": "$.DescribeInstanceAttributeResult",
+                          "Next": "LoopBlockDeviceMappings",
+                          "Retry": [
+                            {
+                              "ErrorEquals": [
+                                "States.Timeout",
+                                "States.HeartbeatTimeout"
+                              ],
+                              "BackoffRate": 2,
+                              "IntervalSeconds": 5,
+                              "MaxAttempts": 5
+                            }
+                          ],
+                          "Catch": [
+                            {
+                              "ErrorEquals": [
+                                "States.ALL"
+                              ],
+                              "Next": "DisableDeleteOnTerminationForEBSvolumeFailed",
+                              "ResultPath": "$.ErrorInfo"
+                            }
+                          ]
+                        },
+                        "LoopBlockDeviceMappings": {
+                          "Type": "Map",
+                          "ItemProcessor": {
+                            "ProcessorConfig": {
+                              "Mode": "INLINE"
+                            },
+                            "StartAt": "CheckEachVolumesDeleteOnTerminationStatus",
+                            "States": {
+                              "CheckEachVolumesDeleteOnTerminationStatus": {
+                                "Type": "Choice",
+                                "Choices": [
+                                  {
+                                    "Next": "DeleteOnTerminationDisabled",
+                                    "Variable": "$.DeleteOnTermination",
+                                    "BooleanEquals": false
+                                  }
+                                ],
+                                "Default": "DeleteOnTerminationFailed"
+                              },
+                              "DeleteOnTerminationDisabled": {
+                                "Type": "Pass",
+                                "End": true
+                              },
+                              "DeleteOnTerminationFailed": {
+                                "Type": "Fail"
+                              }
+                            }
+                          },
+                          "End": true,
+                          "ItemsPath": "$.DescribeInstanceAttributeResult.BlockDeviceMappings",
+                          "ItemSelector": {
+                            "DeviceName.$": "$$.Map.Item.Value.DeviceName",
+                            "DeleteOnTermination.$": "$$.Map.Item.Value.Ebs.DeleteOnTermination"
+                          }
+                        }
+                      }
+                    },
+                    "End": true,
+                    "ItemsPath": "$.PrepareParallelProcessingResult.DeviceNames",
+                    "ItemSelector": {
+                      "DeviceName.$": "$$.Map.Item.Value",
+                      "InstanceId.$": "$.InstanceId"
+                    },
+                    "MaxConcurrency": 5
+                  }
+                }
+              },
+              {
+                "StartAt": "DescribeIamInstanceProfileAssociations",
+                "States": {
+                  "DescribeIamInstanceProfileAssociations": {
+                    "Type": "Task",
+                    "Parameters": {
+                      "Filters": [
+                        {
+                          "Name": "instance-id",
+                          "Values.$": "States.Array($.InstanceId)"
+                        }
+                      ]
+                    },
+                    "Resource": "arn:aws:states:::aws-sdk:ec2:describeIamInstanceProfileAssociations",
+                    "ResultPath": "$.DescribeIamInstanceProfileAssociationsResult",
+                    "Next": "CheckIamInstanceProfileAssociationStatus",
+                    "Retry": [
+                      {
+                        "ErrorEquals": [
+                          "States.Timeout",
+                          "States.HeartbeatTimeout"
+                        ],
+                        "BackoffRate": 2,
+                        "IntervalSeconds": 5,
+                        "MaxAttempts": 5
+                      }
+                    ],
+                    "Catch": [
+                      {
+                        "ErrorEquals": [
+                          "States.ALL"
+                        ],
+                        "Next": "IamInstanceProfileDisassociationFailed",
+                        "ResultPath": "$.ErrorInfo"
+                      }
+                    ]
+                  },
+                  "CheckIamInstanceProfileAssociationStatus": {
+                    "Type": "Choice",
+                    "Choices": [
+                      {
+                        "Next": "DetachIAMInstanceProfile",
+                        "Variable": "$.DescribeIamInstanceProfileAssociationsResult.IamInstanceProfileAssociations[0].AssociationId",
+                        "IsPresent": true
+                      }
+                    ],
+                    "Default": "IamInstanceProfileNotAttached"
+                  },
+                  "IamInstanceProfileNotAttached": {
+                    "Type": "Pass",
+                    "End": true
+                  },
+                  "DetachIAMInstanceProfile": {
+                    "Type": "Task",
+                    "Parameters": {
+                      "AssociationId.$": "$.DescribeIamInstanceProfileAssociationsResult.IamInstanceProfileAssociations[0].AssociationId"
+                    },
+                    "Resource": "arn:aws:states:::aws-sdk:ec2:disassociateIamInstanceProfile",
+                    "Next": "InitializeInstanceProfileDisassociationCheckCount",
+                    "ResultPath": null,
+                    "Retry": [
+                      {
+                        "ErrorEquals": [
+                          "States.Timeout",
+                          "States.HeartbeatTimeout"
+                        ],
+                        "BackoffRate": 2,
+                        "MaxAttempts": 5,
+                        "IntervalSeconds": 5
+                      }
+                    ],
+                    "Catch": [
+                      {
+                        "ErrorEquals": [
+                          "States.ALL"
+                        ],
+                        "Next": "IamInstanceProfileDisassociationFailed",
+                        "ResultPath": "$.ErrorInfo"
+                      }
+                    ]
+                  },
+                  "InitializeInstanceProfileDisassociationCheckCount": {
+                    "Type": "Pass",
+                    "Next": "WaitForDisassociateIamInstanceProfile",
+                    "Result": {
+                      "Count": 1,
+                      "Step": 1
+                    },
+                    "ResultPath": "$.InstanceProfileDisassociationCheckCount"
+                  },
+                  "WaitForDisassociateIamInstanceProfile": {
+                    "Type": "Wait",
+                    "Seconds": 30,
+                    "Next": "DescribeIamInstanceProfileAssociations_02"
+                  },
+                  "DescribeIamInstanceProfileAssociations_02": {
+                    "Type": "Task",
+                    "Parameters": {
+                      "Filters": [
+                        {
+                          "Name": "instance-id",
+                          "Values.$": "States.Array($.InstanceId)"
+                        }
+                      ]
+                    },
+                    "Resource": "arn:aws:states:::aws-sdk:ec2:describeIamInstanceProfileAssociations",
+                    "Next": "CheckIamInstanceProfileDisassociation",
+                    "ResultPath": "$.DescribeIamInstanceProfileAssociationsResult",
+                    "Retry": [
+                      {
+                        "ErrorEquals": [
+                          "States.Timeout",
+                          "States.HeartbeatTimeout"
+                        ],
+                        "BackoffRate": 2,
+                        "IntervalSeconds": 5,
+                        "MaxAttempts": 5
+                      }
+                    ],
+                    "Catch": [
+                      {
+                        "ErrorEquals": [
+                          "States.ALL"
+                        ],
+                        "Next": "IamInstanceProfileDisassociationFailed",
+                        "ResultPath": "$.ErrorInfo"
+                      }
+                    ]
+                  },
+                  "CheckIamInstanceProfileDisassociation": {
+                    "Type": "Choice",
+                    "Choices": [
+                      {
+                        "Next": "IamInstanceProfileDisassociationCompleted",
+                        "Variable": "$.DescribeIamInstanceProfileAssociationsResult.IamInstanceProfileAssociations[0].AssociationId",
+                        "IsPresent": false
+                      },
+                      {
+                        "Next": "InstanceProfileDisassociationCheckCount",
+                        "And": [
+                          {
+                            "Not": {
+                              "Variable": "$.DescribeIamInstanceProfileAssociationsResult.IamInstanceProfileAssociations[0].AssociationId",
+                              "StringEquals": "associated"
+                            }
+                          },
+                          {
+                            "Variable": "$.DescribeIamInstanceProfileAssociationsResult.IamInstanceProfileAssociations[0].AssociationId",
+                            "IsPresent": true
+                          },
+                          {
+                            "Variable": "$.InstanceProfileDisassociationCheckCount.Count",
+                            "NumericLessThan": 20
+                          }
+                        ]
+                      }
+                    ],
+                    "Default": "IamInstanceProfileDisassociationFailed"
+                  },
+                  "IamInstanceProfileDisassociationCompleted": {
+                    "Type": "Pass",
+                    "End": true
+                  },
+                  "IamInstanceProfileDisassociationFailed": {
+                    "Type": "Fail"
+                  },
+                  "InstanceProfileDisassociationCheckCount": {
+                    "Type": "Pass",
+                    "Next": "WaitForDisassociateIamInstanceProfile",
+                    "Parameters": {
+                      "Count.$": "States.MathAdd($.InstanceProfileDisassociationCheckCount.Count, $.InstanceProfileDisassociationCheckCount.Step)",
+                      "Step": 1
+                    },
+                    "ResultPath": "$.InstanceProfileDisassociationCheckCount"
+                  }
+                }
+              },
+              {
+                "StartAt": "DescribeAutoScalingInstances",
+                "States": {
+                  "DescribeAutoScalingInstances": {
+                    "Type": "Task",
+                    "Parameters": {
+                      "InstanceIds.$": "States.Array($.InstanceId)"
+                    },
+                    "Resource": "arn:aws:states:::aws-sdk:autoscaling:describeAutoScalingInstances",
+                    "ResultPath": "$.DescribeAutoScalingInstancesResult",
+                    "Next": "CheckAutoScalingInstances",
+                    "Retry": [
+                      {
+                        "ErrorEquals": [
+                          "States.Timeout",
+                          "States.HeartbeatTimeout"
+                        ],
+                        "BackoffRate": 2,
+                        "MaxAttempts": 5,
+                        "IntervalSeconds": 5
+                      }
+                    ],
+                    "Catch": [
+                      {
+                        "ErrorEquals": [
+                          "States.ALL"
+                        ],
+                        "Next": "InstanceDetachmentFailed",
+                        "ResultPath": "$.ErrorInfo"
+                      }
+                    ]
+                  },
+                  "CheckAutoScalingInstances": {
+                    "Type": "Choice",
+                    "Choices": [
+                      {
+                        "Next": "DetachFromAutoScalingGroup",
+                        "Variable": "$.DescribeAutoScalingInstancesResult.AutoScalingInstances[0].AutoScalingGroupName",
+                        "IsPresent": true
+                      }
+                    ],
+                    "Default": "InstanceNotInAutoScalingGroup"
+                  },
+                  "InstanceNotInAutoScalingGroup": {
+                    "Type": "Pass",
+                    "End": true
+                  },
+                  "DetachFromAutoScalingGroup": {
+                    "Type": "Task",
+                    "Parameters": {
+                      "InstanceIds.$": "States.Array($.InstanceId)",
+                      "AutoScalingGroupName.$": "$.DescribeAutoScalingInstancesResult.AutoScalingInstances[0].AutoScalingGroupName",
+                      "ShouldDecrementDesiredCapacity": "false"
+                    },
+                    "Resource": "arn:aws:states:::aws-sdk:autoscaling:detachInstances",
+                    "Next": "InitializeInstanceDetachmentCheckCount",
+                    "ResultPath": "$.DetachInstancesResult",
+                    "Retry": [
+                      {
+                        "ErrorEquals": [
+                          "States.Timeout",
+                          "States.HeartbeatTimeout"
+                        ],
+                        "BackoffRate": 2,
+                        "IntervalSeconds": 5,
+                        "MaxAttempts": 5
+                      }
+                    ],
+                    "Catch": [
+                      {
+                        "ErrorEquals": [
+                          "States.ALL"
+                        ],
+                        "Next": "InstanceDetachmentFailed",
+                        "ResultPath": "$.ErrorInfo"
+                      }
+                    ]
+                  },
+                  "InitializeInstanceDetachmentCheckCount": {
+                    "Type": "Pass",
+                    "Next": "WaitForDetachInstances",
+                    "Result": {
+                      "Count": 1,
+                      "Step": 1
+                    },
+                    "ResultPath": "$.InstanceDetachmentCheckCount"
+                  },
+                  "WaitForDetachInstances": {
+                    "Type": "Wait",
+                    "Seconds": 5,
+                    "Next": "DescribeAutoScalingInstances_02"
+                  },
+                  "DescribeAutoScalingInstances_02": {
+                    "Type": "Task",
+                    "Parameters": {
+                      "InstanceIds.$": "States.Array($.InstanceId)"
+                    },
+                    "Resource": "arn:aws:states:::aws-sdk:autoscaling:describeAutoScalingInstances",
+                    "ResultPath": "$.DescribeAutoScalingInstancesResult",
+                    "Next": "CheckInstanceDetachment",
+                    "Retry": [
+                      {
+                        "ErrorEquals": [
+                          "States.Timeout",
+                          "States.HeartbeatTimeout"
+                        ],
+                        "BackoffRate": 2,
+                        "IntervalSeconds": 5,
+                        "MaxAttempts": 5
+                      }
+                    ],
+                    "Catch": [
+                      {
+                        "ErrorEquals": [
+                          "States.ALL"
+                        ],
+                        "Next": "InstanceDetachmentFailed",
+                        "ResultPath": "$.ErrorInfo"
+                      }
+                    ]
+                  },
+                  "CheckInstanceDetachment": {
+                    "Type": "Choice",
+                    "Choices": [
+                      {
+                        "Next": "InstanceDetachmentCompleted",
+                        "Variable": "$.DescribeAutoScalingInstancesResult.AutoScalingInstances[0].AutoScalingGroupName",
+                        "IsPresent": false
+                      },
+                      {
+                        "Next": "InstanceDetachmentCheckCount",
+                        "And": [
+                          {
+                            "Variable": "$.DescribeAutoScalingInstancesResult.AutoScalingInstances[0].AutoScalingGroupName",
+                            "IsPresent": true
+                          },
+                          {
+                            "Variable": "$.InstanceDetachmentCheckCount.Count",
+                            "NumericLessThan": 20
+                          }
+                        ]
+                      }
+                    ],
+                    "Default": "InstanceDetachmentFailed"
+                  },
+                  "InstanceDetachmentCompleted": {
+                    "Type": "Pass",
+                    "End": true
+                  },
+                  "InstanceDetachmentCheckCount": {
+                    "Type": "Pass",
+                    "Parameters": {
+                      "Count.$": "States.MathAdd($.InstanceDetachmentCheckCount.Count, $.InstanceDetachmentCheckCount.Step)",
+                      "Step": 1
+                    },
+                    "ResultPath": "$.InstanceDetachmentCheckCount",
+                    "Next": "WaitForDetachInstances"
+                  },
+                  "InstanceDetachmentFailed": {
+                    "Type": "Fail"
+                  }
+                }
+              },
+              {
+                "StartAt": "DescribeTargetGroups",
+                "States": {
+                  "DescribeTargetGroups": {
+                    "Type": "Task",
+                    "Parameters": {},
+                    "Resource": "arn:aws:states:::aws-sdk:elasticloadbalancingv2:describeTargetGroups",
+                    "ResultPath": "$.DescribeTargetGroupsResult",
+                    "Next": "Deregister instance from each target group",
+                    "Retry": [
+                      {
+                        "ErrorEquals": [
+                          "States.Timeout",
+                          "States.HeartbeatTimeout"
+                        ],
+                        "BackoffRate": 2,
+                        "IntervalSeconds": 5,
+                        "MaxAttempts": 5
+                      }
+                    ],
+                    "Catch": [
+                      {
+                        "ErrorEquals": [
+                          "States.ALL"
+                        ],
+                        "Next": "DeregisterinstanceFailed",
+                        "ResultPath": "$.ErrorInfo"
+                      }
+                    ]
+                  },
+                  "DeregisterinstanceFailed": {
+                    "Type": "Fail"
+                  },
+                  "Deregister instance from each target group": {
+                    "Type": "Map",
+                    "ItemProcessor": {
+                      "ProcessorConfig": {
+                        "Mode": "INLINE"
+                      },
+                      "StartAt": "DescribeTargetHealth",
+                      "States": {
+                        "DescribeTargetHealth": {
+                          "Type": "Task",
+                          "Parameters": {
+                            "TargetGroupArn.$": "$.TargetGroupArn"
+                          },
+                          "Resource": "arn:aws:states:::aws-sdk:elasticloadbalancingv2:describeTargetHealth",
+                          "ResultPath": "$.DescribeTargetHealth",
+                          "Next": "ConvertTargetHealthToFlag",
+                          "Retry": [
+                            {
+                              "ErrorEquals": [
+                                "States.Timeout",
+                                "States.HeartbeatTimeout"
+                              ],
+                              "BackoffRate": 2,
+                              "IntervalSeconds": 5,
+                              "MaxAttempts": 5
+                            }
+                          ],
+                          "Catch": [
+                            {
+                              "ErrorEquals": [
+                                "States.ALL"
+                              ],
+                              "Next": "TargetDeregistrationFailed",
+                              "ResultPath": "$.ErrorInfo"
+                            }
+                          ]
+                        },
+                        "ConvertTargetHealthToFlag": {
+                          "Type": "Pass",
+                          "Parameters": {
+                            "TargetGroupArn.$": "$.TargetGroupArn",
+                            "InstanceId.$": "$.InstanceId",
+                            "IsRegistered.$": "States.ArrayContains($.DescribeTargetHealth.TargetHealthDescriptions[*].Target.Id, $.InstanceId)"
+                          },
+                          "ResultPath": "$.ConvertTargetHealthToFlagResult",
+                          "Next": "CheckIfRegistered"
+                        },
+                        "CheckIfRegistered": {
+                          "Type": "Choice",
+                          "Choices": [
+                            {
+                              "Next": "DeregisterFromTargetGroup",
+                              "Variable": "$.ConvertTargetHealthToFlagResult.IsRegistered",
+                              "BooleanEquals": true
+                            }
+                          ],
+                          "Default": "InstanceNotInTargetGroup"
+                        },
+                        "DeregisterFromTargetGroup": {
+                          "Type": "Task",
+                          "Parameters": {
+                            "TargetGroupArn.$": "$.TargetGroupArn",
+                            "Targets": [
+                              {
+                                "Id.$": "$.InstanceId"
+                              }
+                            ]
+                          },
+                          "Resource": "arn:aws:states:::aws-sdk:elasticloadbalancingv2:deregisterTargets",
+                          "Next": "InitializeTargetDeregistrationCheckCount",
+                          "ResultPath": null,
+                          "Retry": [
+                            {
+                              "ErrorEquals": [
+                                "States.Timeout",
+                                "States.HeartbeatTimeout"
+                              ],
+                              "BackoffRate": 2,
+                              "IntervalSeconds": 5,
+                              "MaxAttempts": 5
+                            }
+                          ],
+                          "Catch": [
+                            {
+                              "ErrorEquals": [
+                                "States.ALL"
+                              ],
+                              "Next": "TargetDeregistrationFailed",
+                              "ResultPath": "$.ErrorInfo"
+                            }
+                          ]
+                        },
+                        "InitializeTargetDeregistrationCheckCount": {
+                          "Type": "Pass",
+                          "Next": "WaitForDeregistration",
+                          "Result": {
+                            "Count": 1,
+                            "Step": 1
+                          },
+                          "ResultPath": "$.TargetDeregistrationCheckCount"
+                        },
+                        "WaitForDeregistration": {
+                          "Type": "Wait",
+                          "Seconds": 30,
+                          "Next": "DescribeTargetHealth_02"
+                        },
+                        "DescribeTargetHealth_02": {
+                          "Type": "Task",
+                          "Parameters": {
+                            "TargetGroupArn.$": "$.TargetGroupArn"
+                          },
+                          "Resource": "arn:aws:states:::aws-sdk:elasticloadbalancingv2:describeTargetHealth",
+                          "ResultPath": "$.DescribeTargetHealth",
+                          "Next": "ConvertTargetHealthToFlag_02",
+                          "Retry": [
+                            {
+                              "ErrorEquals": [
+                                "States.Timeout",
+                                "States.HeartbeatTimeout"
+                              ],
+                              "BackoffRate": 2,
+                              "IntervalSeconds": 5,
+                              "MaxAttempts": 5
+                            }
+                          ],
+                          "Catch": [
+                            {
+                              "ErrorEquals": [
+                                "States.ALL"
+                              ],
+                              "Next": "TargetDeregistrationFailed",
+                              "ResultPath": "$.ErrorInfo"
+                            }
+                          ]
+                        },
+                        "ConvertTargetHealthToFlag_02": {
+                          "Type": "Pass",
+                          "Parameters": {
+                            "TargetGroupArn.$": "$.TargetGroupArn",
+                            "InstanceId.$": "$.InstanceId",
+                            "IsRegistered.$": "States.ArrayContains($.DescribeTargetHealth.TargetHealthDescriptions[*].Target.Id, $.InstanceId)"
+                          },
+                          "ResultPath": "$.ConvertTargetHealthToFlagResult",
+                          "Next": "CheckIfTargetIsDeregistered"
+                        },
+                        "CheckIfTargetIsDeregistered": {
+                          "Type": "Choice",
+                          "Choices": [
+                            {
+                              "Next": "DeregisteredTarget",
+                              "Variable": "$.ConvertTargetHealthToFlagResult.IsRegistered",
+                              "BooleanEquals": false
+                            },
+                            {
+                              "Next": "TargetDeregistrationCheckCount",
+                              "And": [
+                                {
+                                  "Variable": "$.ConvertTargetHealthToFlagResult.IsRegistered",
+                                  "BooleanEquals": true
+                                },
+                                {
+                                  "Variable": "$.TargetDeregistrationCheckCount.Count",
+                                  "NumericLessThan": 20
+                                }
+                              ]
+                            }
+                          ],
+                          "Default": "TargetDeregistrationFailed"
+                        },
+                        "TargetDeregistrationCheckCount": {
+                          "Type": "Pass",
+                          "Next": "WaitForDeregistration",
+                          "ResultPath": "$.TargetDeregistrationCheckCount",
+                          "Parameters": {
+                            "Count.$": "States.MathAdd($.TargetDeregistrationCheckCount.Count, $.TargetDeregistrationCheckCount.Step)",
+                            "Step": 1
+                          }
+                        },
+                        "DeregisteredTarget": {
+                          "Type": "Pass",
+                          "End": true
+                        },
+                        "InstanceNotInTargetGroup": {
+                          "Type": "Pass",
+                          "End": true
+                        },
+                        "TargetDeregistrationFailed": {
+                          "Type": "Fail"
+                        }
+                      }
+                    },
+                    "End": true,
+                    "ItemsPath": "$.DescribeTargetGroupsResult.TargetGroups",
+                    "ItemSelector": {
+                      "TargetGroupArn.$": "$$.Map.Item.Value.TargetGroupArn",
+                      "InstanceId.$": "$.InstanceId"
+                    }
+                  }
+                }
+              },
+              {
+                "StartAt": "Attach an isolation security group to each ENI",
+                "States": {
+                  "Attach an isolation security group to each ENI": {
+                    "Type": "Map",
+                    "ItemProcessor": {
+                      "ProcessorConfig": {
+                        "Mode": "INLINE"
+                      },
+                      "StartAt": "DescribeNetworkInterfaces",
+                      "States": {
+                        "DescribeNetworkInterfaces": {
+                          "Type": "Task",
+                          "Parameters": {
+                            "NetworkInterfaceIds.$": "States.Array($.NetworkInterfaceId)"
+                          },
+                          "Resource": "arn:aws:states:::aws-sdk:ec2:describeNetworkInterfaces",
+                          "ResultSelector": {
+                            "VpcId.$": "$.NetworkInterfaces[0].VpcId",
+                            "CurrentGroups.$": "$.NetworkInterfaces[0].Groups[*].GroupId"
+                          },
+                          "ResultPath": "$.DescribeNetworkInterfacesResult",
+                          "Next": "CreateIsolationSecurityGroup",
+                          "Retry": [
+                            {
+                              "ErrorEquals": [
+                                "States.Timeout",
+                                "States.HeartbeatTimeout"
+                              ],
+                              "BackoffRate": 2,
+                              "IntervalSeconds": 5,
+                              "MaxAttempts": 5
+                            }
+                          ],
+                          "Catch": [
+                            {
+                              "ErrorEquals": [
+                                "States.ALL"
+                              ],
+                              "Next": "ApplyIsolationSGFailed",
+                              "ResultPath": "$.ErrorInfo"
+                            }
+                          ]
+                        },
+                        "CreateIsolationSecurityGroup": {
+                          "Type": "Task",
+                          "Parameters": {
+                            "GroupName.$": "States.Format('ec2-isolation-{}-{}-{}', $.InstanceId, $.DescribeNetworkInterfacesResult.VpcId, States.UUID())",
+                            "Description": "SG for isolation per VPC",
+                            "VpcId.$": "$.DescribeNetworkInterfacesResult.VpcId"
+                          },
+                          "Resource": "arn:aws:states:::aws-sdk:ec2:createSecurityGroup",
+                          "ResultSelector": {
+                            "IsolationSecurityGroupId.$": "$.GroupId"
+                          },
+                          "ResultPath": "$.CreateIsolationSecurityGroupResult",
+                          "Next": "AttachIsolationSecurityGroup",
+                          "Retry": [
+                            {
+                              "ErrorEquals": [
+                                "States.Timeout",
+                                "States.HeartbeatTimeout"
+                              ],
+                              "BackoffRate": 2,
+                              "IntervalSeconds": 5,
+                              "MaxAttempts": 5
+                            }
+                          ],
+                          "Catch": [
+                            {
+                              "ErrorEquals": [
+                                "States.ALL"
+                              ],
+                              "Next": "ApplyIsolationSGFailed",
+                              "ResultPath": "$.ErrorInfo"
+                            }
+                          ]
+                        },
+                        "AttachIsolationSecurityGroup": {
+                          "Type": "Task",
+                          "Parameters": {
+                            "NetworkInterfaceId.$": "$.NetworkInterfaceId",
+                            "Groups.$": "States.Array($.CreateIsolationSecurityGroupResult.IsolationSecurityGroupId)"
+                          },
+                          "Resource": "arn:aws:states:::aws-sdk:ec2:modifyNetworkInterfaceAttribute",
+                          "ResultPath": null,
+                          "Next": "WaitForVerifyIsolationSG",
+                          "Retry": [
+                            {
+                              "ErrorEquals": [
+                                "States.Timeout",
+                                "States.HeartbeatTimeout"
+                              ],
+                              "BackoffRate": 2,
+                              "IntervalSeconds": 5,
+                              "MaxAttempts": 5
+                            }
+                          ],
+                          "Catch": [
+                            {
+                              "ErrorEquals": [
+                                "States.ALL"
+                              ],
+                              "Next": "ApplyIsolationSGFailed",
+                              "ResultPath": "$.ErrorInfo"
+                            }
+                          ]
+                        },
+                        "WaitForVerifyIsolationSG": {
+                          "Type": "Wait",
+                          "Seconds": 5,
+                          "Next": "DescribeNetworkInterfaces_02"
+                        },
+                        "DescribeNetworkInterfaces_02": {
+                          "Type": "Task",
+                          "Parameters": {
+                            "NetworkInterfaceIds.$": "States.Array($.NetworkInterfaceId)"
+                          },
+                          "Resource": "arn:aws:states:::aws-sdk:ec2:describeNetworkInterfaces",
+                          "ResultSelector": {
+                            "AttachedGroups.$": "$.NetworkInterfaces[0].Groups[*].GroupId"
+                          },
+                          "ResultPath": "$.DescribeNetworkInterfacesResult",
+                          "Next": "EvaluateIsolationSGAttachment",
+                          "Retry": [
+                            {
+                              "ErrorEquals": [
+                                "States.Timeout",
+                                "States.HeartbeatTimeout"
+                              ],
+                              "BackoffRate": 2,
+                              "IntervalSeconds": 5,
+                              "MaxAttempts": 5
+                            }
+                          ],
+                          "Catch": [
+                            {
+                              "ErrorEquals": [
+                                "States.ALL"
+                              ],
+                              "ResultPath": "$.ErrorInfo",
+                              "Next": "ApplyIsolationSGFailed"
+                            }
+                          ]
+                        },
+                        "EvaluateIsolationSGAttachment": {
+                          "Type": "Pass",
+                          "Parameters": {
+                            "IsMatch.$": "States.ArrayContains($.DescribeNetworkInterfacesResult.AttachedGroups, $.CreateIsolationSecurityGroupResult.IsolationSecurityGroupId)"
+                          },
+                          "ResultPath": "$.EvaluateIsolationSGAttachmentResult",
+                          "Next": "CheckIsolationSGAttached"
+                        },
+                        "CheckIsolationSGAttached": {
+                          "Type": "Choice",
+                          "Choices": [
+                            {
+                              "Next": "IsolationSGAttached",
+                              "Variable": "$.EvaluateIsolationSGAttachmentResult.IsMatch",
+                              "BooleanEquals": true
+                            }
+                          ],
+                          "Default": "ApplyIsolationSGFailed"
+                        },
+                        "IsolationSGAttached": {
+                          "Type": "Pass",
+                          "End": true
+                        },
+                        "ApplyIsolationSGFailed": {
+                          "Type": "Fail"
+                        }
+                      }
+                    },
+                    "End": true,
+                    "ItemsPath": "$.PrepareParallelProcessingResult.NetworkInterfaceIds",
+                    "ItemSelector": {
+                      "NetworkInterfaceId.$": "$$.Map.Item.Value",
+                      "InstanceId.$": "$.InstanceId"
+                    },
+                    "MaxConcurrency": 5
+                  }
+                }
+              }
+            ],
+            "End": true
+          },
+          "TerminationProtectionFailed": {
+            "Type": "Fail"
+          },
+          "CheckTagFailed": {
+            "Type": "Fail"
+          }
+        }
+      },
+      "End": true
+    }
+  }
+}
