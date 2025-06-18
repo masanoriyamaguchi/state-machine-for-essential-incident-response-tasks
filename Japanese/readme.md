@@ -23,7 +23,7 @@ AWSにおけるセキュリティインシデントレスポンスの手順は�
 このツールは法律的に有効な証拠としてデータを取得することは目的としていません。
 
 ## ステートマシン
-![image info](Documentation/statemachine.png)
+![image info](../Documentation/statemachine.png)
 
 ## デプロイ
 AWS Serverless Application Modelを使ってデプロイします。必要なIAMポリシー、IAMロールは同時に作成されます。
