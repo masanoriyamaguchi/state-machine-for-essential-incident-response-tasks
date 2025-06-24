@@ -10,13 +10,29 @@ The purpose of automation is to enable rapid response and reduce the risk of hum
 - However, some steps are always required regardless of context.
 - Time pressure and psychological stress significantly increase the likelihood of human error.
 
-## Tool Used
+## Incident Response Actions Covered by This Tool
+1.  Tag the target EC2 instance to indicate it is under investigation
+2.	Detach the IAM instance profile from the target EC2 instance
+3.	Detach the target EC2 instance from the Auto Scaling Group
+4.	Deregister the target EC2 instance from the target group
+5.	Detach security groups from all ENIs attached to the target EC2 instance and attach an isolation security group
+6.	Collect instance metadata from the target EC2 instance
+7.	Enable termination protection and stop protection on the target EC2 instance
+8.	Disable the DeleteOnTermination attribute for all EBS volumes attached to the target EC2 instance
+9.	Create snapshots of all EBS volumes attached to the target EC2 instance
+
+## Reasons for Choosing AWS Step Functions
 This tool uses AWS Step Functions, which meets the following criteria:
 - Does not require programming skills
-- Allows building clear workflows
+- ßAbility to build and operate workflows
 - Provides visibility into workflows and execution results
 - Easy to maintain without being dependent on specific individuals
 - Fast execution and short time to launch
+
+## AWS Services Used
+- AWS Step Functions
+- AWS IAM
+- ßAmazon CloudWatch Logs (for storing Step Functions execution logs)
 
 ## Limitations
 This tool is not intended for collecting data as legally admissible evidence.
